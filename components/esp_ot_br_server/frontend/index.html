@@ -1,0 +1,175 @@
+<!--
+  SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <div class="flex-between mb-16">
+        <div>
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-desc" style="margin-bottom:0">Thread Border Router status overview</p>
+        </div>
+        <button class="btn btn-primary btn-sm" id="refreshBtn" onclick="refreshAll()">Refresh</button>
+    </div>
+
+    <div class="grid grid-2 section">
+        <div class="card">
+            <div class="card-header">Network Status</div>
+            <div class="info-row">
+                <span class="info-label">Name</span>
+                <span class="info-value" id="p-name">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Role</span>
+                <span class="info-value" id="p-role">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Channel</span>
+                <span class="info-value" id="p-ch">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">TX Power</span>
+                <span class="info-value" id="p-txpow">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">PAN ID</span>
+                <span class="info-value" id="p-panid">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Extended PAN ID</span>
+                <span class="info-value mono" id="p-xpanid">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Partition ID</span>
+                <span class="info-value" id="p-partid">-</span>
+            </div>
+        </div>
+        <div>
+            <div class="card section">
+                <div class="card-header">System</div>
+                <div class="info-row">
+                    <span class="info-label">Uptime</span>
+                    <span class="info-value" id="p-uptime">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Free Heap</span>
+                    <span class="info-value" id="p-heap">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">OT Version</span>
+                    <span class="info-value" id="p-otver">-</span>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Identifiers</div>
+                <div class="info-row">
+                    <span class="info-label">IEEE EUI-64</span>
+                    <span class="info-value mono" id="p-eui64">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Border Agent ID</span>
+                    <span class="info-value mono" id="p-baid">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">PSKc</span>
+                    <span class="info-value mono" id="p-pskc">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card section">
+        <div class="card-header">IPv6 Addresses</div>
+        <div id="addrList"><p class="text-muted" style="font-size:13px">Loading...</p></div>
+    </div>
+
+</div>
+<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+<script src="/static/api.js"></script>
+<script>
+function renderProperties(data) {
+    if (!data || data.error || !data.result) return;
+    var r = data.result;
+    document.getElementById('p-name').textContent = r['Network:Name'] || '-';
+    document.getElementById('p-role').textContent = r['Thread:Role'] || '-';
+    document.getElementById('p-ch').textContent = r['RCP:Channel'] || '-';
+    document.getElementById('p-txpow').textContent = r['RCP:TxPower'] || '-';
+    document.getElementById('p-panid').textContent = r['Network:PANID'] || '-';
+    document.getElementById('p-xpanid').textContent = r['Network:XPANID'] || '-';
+    document.getElementById('p-partid').textContent = r['Network:PartitionID'] || '-';
+    document.getElementById('p-uptime').textContent = r['System:Uptime'] || '-';
+    document.getElementById('p-heap').textContent = r['System:FreeHeap'] || '-';
+    document.getElementById('p-otver').textContent = r['OpenThread:Version'] || '-';
+    document.getElementById('p-eui64').textContent = r['RCP:EUI64'] || '-';
+    document.getElementById('p-baid').textContent = r['Network:BorderAgentID'] || '-';
+    document.getElementById('p-pskc').textContent = r['OpenThread:PSKc'] || '-';
+}
+
+function renderAddresses(data) {
+    var list = (data && data.result) ? data.result : [];
+    var el = document.getElementById('addrList');
+    if (!list.length) {
+        checkThreadState(function(role, connected) {
+            if (!connected) {
+                el.innerHTML = '<div class="disabled-banner">Thread network is not connected. <a href="/network.html">Go to Network</a> to join or form a network.</div>';
+            } else {
+                el.innerHTML = '<p class="text-muted" style="font-size:13px">No addresses</p>';
+            }
+        });
+        return;
+    }
+    var html = '<table><thead><tr><th>Address</th><th>Origin</th><th>Status</th></tr></thead><tbody>';
+    for (var i = 0; i < list.length; i++) {
+        var a = list[i];
+        var badge = 'badge-info';
+        if (a.origin === 'manual') badge = 'badge-success';
+        else if (a.origin === 'thread') badge = 'badge-warning';
+        var statusBadge = a.preferred ? '<span class="badge badge-success">preferred</span>'
+                                      : '<span class="badge badge-danger">deprecated</span>';
+        html += '<tr><td style="font-family:\'Courier New\',Consolas,monospace;font-size:12px">' +
+                escapeHtml(a.address) + '/' + escapeHtml(a.prefixLength) +
+                '</td><td><span class="badge ' + badge + '">' + escapeHtml(a.origin) + '</span></td><td>' + statusBadge + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+function loadProperties() {
+    return apiGet('/get_properties').then(renderProperties).catch(function() {
+        showToast('Failed to connect to device', 'error');
+    });
+}
+
+function loadAddresses() {
+    return apiGet('/ipaddr').then(renderAddresses).catch(function() {});
+}
+
+function refreshAll() {
+    var btn = document.getElementById('refreshBtn');
+    btn.disabled = true; btn.textContent = 'Loading...';
+    Promise.all([loadProperties(), loadAddresses()]).then(function() {
+        btn.disabled = false; btn.textContent = 'Refresh';
+        showToast('Dashboard refreshed', 'success');
+    }).catch(function() {
+        btn.disabled = false; btn.textContent = 'Refresh';
+    });
+}
+
+/* Render from cache instantly, then fetch live data */
+renderProperties(getCached('/get_properties'));
+renderAddresses(getCached('/ipaddr'));
+loadProperties();
+loadAddresses();
+</script>
+</body>
+</html>
