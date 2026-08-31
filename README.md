@@ -4,11 +4,67 @@
 
 This example demonstrates an [OpenThread border router](https://openthread.io/guides/border-router).
 
+This repository is standalone: the `esp_ot_br_server`, `esp_br_http_ota` and `thread_border_router`
+components of [esp-thread-br](https://github.com/espressif/esp-thread-br) are vendored under
+`components/`, so only ESP-IDF is required to build it.
+
+On top of the upstream example it provides:
+
+- A **Firmware** page in the web GUI to update the border router from a browser upload or from a URL.
+- A **Wi-Fi** page in the web GUI to scan for and switch to another network.
+- A setup access point (`ESP-ThreadBR-XXXX`, http://192.168.4.1) that serves the *complete* web GUI,
+  so the Thread dataset/TLVs can already be configured before the device is on your Wi-Fi network.
+
+## Getting the code and building it
+
+Tested with ESP-IDF v5.5.4 and v5.5.5.
+
+```bash
+git clone https://github.com/hencou/esp-thread-border-router.git
+cd esp-thread-border-router
+
+# Build the RCP image once, it is packed into the border router firmware
+(cd $IDF_PATH/examples/openthread/ot_rcp && idf.py set-target esp32h2 build)
+
+. $IDF_PATH/export.sh
+idf.py set-target esp32s3
+idf.py -p /dev/ttyACM0 build flash monitor
+```
+
+When you switch to this version from an older build, remove the stale `sdkconfig` first so that the
+new defaults (`OPENTHREAD_BR_AUTO_START`, `OPENTHREAD_BR_START_WEB`, `OPENTHREAD_BR_SOFTAP_SETUP`)
+are applied, or enable those three options in `idf.py menuconfig`.
+
+## Web GUI
+
+The web server runs on port 80 in both modes and always exposes the same pages.
+
+### First start / no Wi-Fi connection
+
+1. The device starts the `ESP-ThreadBR-XXXX` access point (open network).
+2. Connect to it; the captive portal opens http://192.168.4.1/wifi_configuration.html.
+3. Optionally configure the Thread network first via *Management → Network* (dataset and TLVs work
+   while the access point is up).
+4. Enter the Wi-Fi credentials and save. They are stored in NVS and the device connects as a
+   station; on failure it reboots and brings the setup access point back up.
+
+### Firmware updates
+
+*System → Firmware* shows the running version and the target OTA partition and offers:
+
+- **Upload an image**: send `build/esp_ot_br.bin` straight from the browser.
+- **Update from a URL**: the device downloads the image itself (HTTPS is verified against the
+  certificate bundle). Tick *Combined host + RCP image* for a `build/ota_with_rcp_image` bundle
+  created with `CREATE_OTA_IMAGE_WITH_RCP_FW`; the RCP is then updated on the next boot.
+
+The device restarts automatically after a successful update. Only one update can run at a time and
+images larger than the OTA partition are rejected before anything is written.
+
 ## How to use example
 
 ### Hardware Required
 
-Please refer to [ESP Thread Border Router Hardware](../../README.md##Hardware-Platforms), the ESP Thread Border Router Board is recommended for this example.
+Please refer to [ESP Thread Border Router Hardware](https://github.com/espressif/esp-thread-br#hardware-platforms), the ESP Thread Border Router Board is recommended for this example.
 
 ### Set up ESP IDF
 
@@ -39,7 +95,7 @@ If the `OPENTHREAD_BR_AUTO_START` option is enabled, the device will connect to 
 - The Wi-Fi network's ssid and psk needs to be pre-configured with `EXAMPLE_WIFI_SSID` and `EXAMPLE_WIFI_PASSWORD`. In this mode, the device will first attempt to use the Wi-Fi SSID and password stored in NVS. If no Wi-Fi information is stored, it will then use the pre-configured ssid and psk.
 - The Thread network parameters could be pre-configured with `OPENTHREAD_NETWORK_xx` options.
 
-If the `OPENTHREAD_BR_START_WEB` option is enabled, [ESP Thread Border Router Web Server](../../components/esp_ot_br_server/README.md) will be provided to configure and query Thread network via a Web GUI.
+If the `OPENTHREAD_BR_START_WEB` option is enabled, [ESP Thread Border Router Web Server](components/esp_ot_br_server/README.md) will be provided to configure and query Thread network via a Web GUI.
 
 The `ESP_CONSOLE_USB_SERIAL_JTAG` option is enabled by default for ESP Thread Border Router Hardware. If you are using other hardware, you may enable `ESP_CONSOLE_UART_DEFAULT` if you wish to use the UART port for serial communication instead. In either case, `OPENTHREAD_CONSOLE_TYPE_USB_SERIAL_JTAG` or `OPENTHREAD_CONSOLE_TYPE_UART` will be selected accordingly. If you enable `ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG`, please manually specify which `OPENTHREAD_CONSOLE_TYPE` you would like to use.
 

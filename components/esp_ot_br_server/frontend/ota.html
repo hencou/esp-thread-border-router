@@ -1,0 +1,208 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Firmware</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <h1 class="page-title">Firmware</h1>
+    <p class="page-desc">Over-the-air update of the border router</p>
+
+    <div class="card section">
+        <div class="card-header">Running firmware</div>
+        <div class="info-row"><span class="info-label">Project</span><span class="info-value" id="fwName">-</span></div>
+        <div class="info-row"><span class="info-label">Version</span><span class="info-value" id="fwVersion">-</span></div>
+        <div class="info-row"><span class="info-label">Compiled</span><span class="info-value" id="fwDate">-</span></div>
+        <div class="info-row"><span class="info-label">ESP-IDF</span><span class="info-value" id="fwIdf">-</span></div>
+        <div class="info-row"><span class="info-label">Running partition</span><span class="info-value" id="fwRunning">-</span></div>
+        <div class="info-row"><span class="info-label">Target partition</span><span class="info-value" id="fwTarget">-</span></div>
+    </div>
+
+    <div class="card section">
+        <div class="card-header">Upload an image</div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+            Select the application binary (<code>esp_ot_br.bin</code>) built for this board. The
+            device restarts automatically after a successful update.
+        </p>
+        <div class="form-group">
+            <label class="form-label">Firmware file *</label>
+            <input class="form-input" id="fwFile" type="file" accept=".bin">
+            <div class="form-hint" id="fwSizeHint"></div>
+        </div>
+        <button type="button" class="btn btn-primary" id="uploadBtn" onclick="uploadFirmware()">Upload &amp; flash</button>
+    </div>
+
+    <div class="card section">
+        <div class="card-header">Update from a URL</div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+            The device downloads the image itself, so it needs internet access. HTTPS is verified
+            against the built-in certificate bundle.
+        </p>
+        <div class="form-group">
+            <label class="form-label">Image URL *</label>
+            <input class="form-input" id="fwUrl" type="url" placeholder="https://example.com/esp_ot_br.bin">
+        </div>
+        <div class="form-group hidden" id="combinedGroup">
+            <label class="form-check"><input type="checkbox" id="fwCombined"> Combined host + RCP image</label>
+            <div class="form-hint">Enable for images that also contain the RCP firmware</div>
+        </div>
+        <button type="button" class="btn btn-primary" id="urlBtn" onclick="startUrlUpdate()">Start update</button>
+    </div>
+
+    <div class="card section hidden" id="progressCard">
+        <div class="card-header">Update progress</div>
+        <div id="progressBarWrap" style="background:var(--border,#e5e7eb);border-radius:6px;height:10px;overflow:hidden">
+            <div id="progressBar" style="background:var(--primary);height:100%;width:0%;transition:width .3s"></div>
+        </div>
+        <div class="mt-8" id="progressText" style="font-size:13px"></div>
+    </div>
+</div>
+<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+
+<script src="/static/api.js"></script>
+<script>
+var pollTimer = null;
+var partitionSize = 0;
+
+function setProgress(percent, text, type) {
+    document.getElementById('progressCard').classList.remove('hidden');
+    document.getElementById('progressBar').style.width = Math.max(0, Math.min(100, percent)) + '%';
+    var el = document.getElementById('progressText');
+    el.textContent = text;
+    el.style.color = type === 'error' ? 'var(--danger)'
+                                      : (type === 'success' ? 'var(--success)' : 'var(--text-muted)');
+}
+
+function setBusy(busy) {
+    document.getElementById('uploadBtn').disabled = busy;
+    document.getElementById('urlBtn').disabled = busy;
+}
+
+function renderStatus(data) {
+    document.getElementById('fwName').textContent = data.project_name || '-';
+    document.getElementById('fwVersion').textContent = data.version || '-';
+    document.getElementById('fwDate').textContent = data.compile_time || '-';
+    document.getElementById('fwIdf').textContent = data.idf_version || '-';
+    document.getElementById('fwRunning').textContent = data.running_partition || '-';
+    partitionSize = data.update_partition_size || 0;
+    document.getElementById('fwTarget').textContent =
+        data.update_partition ? data.update_partition + ' (' + Math.round(partitionSize / 1024) + ' KiB)' : '-';
+    document.getElementById('fwSizeHint').textContent =
+        partitionSize ? 'Maximum image size: ' + Math.round(partitionSize / 1024) + ' KiB' : '';
+    if (data.combined_supported) {
+        document.getElementById('combinedGroup').classList.remove('hidden');
+    }
+    return data;
+}
+
+function pollStatus() {
+    apiGet('/ota_status').then(function(data) {
+        renderStatus(data);
+        if (data.state === 'running') {
+            setProgress(data.progress, 'Downloading and writing... ' + data.progress + '%');
+            return;
+        }
+        clearInterval(pollTimer);
+        pollTimer = null;
+        setBusy(false);
+        if (data.state === 'success') {
+            setProgress(100, data.message + ' – the device is restarting', 'success');
+        } else if (data.state === 'failed') {
+            setProgress(0, data.message, 'error');
+        }
+    }).catch(function() {});
+}
+
+function startPolling() {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+    }
+    pollTimer = setInterval(pollStatus, 1500);
+}
+
+function uploadFirmware() {
+    var input = document.getElementById('fwFile');
+    if (!input.files.length) {
+        showToast('Please select a firmware file', 'error');
+        return;
+    }
+    var file = input.files[0];
+    if (partitionSize && file.size > partitionSize) {
+        showToast('The image is larger than the OTA partition', 'error');
+        return;
+    }
+
+    setBusy(true);
+    setProgress(0, 'Uploading ' + file.name + '...');
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/ota_upload');
+    xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+            var percent = Math.round(100 * e.loaded / e.total);
+            setProgress(percent, 'Uploading and writing... ' + percent + '%');
+        }
+    };
+    xhr.onload = function() {
+        setBusy(false);
+        var message = 'Update failed';
+        try {
+            var data = JSON.parse(xhr.responseText);
+            message = data.message || message;
+            if (data.success) {
+                setProgress(100, message + ' – the device is restarting', 'success');
+                return;
+            }
+        } catch (e) {
+        }
+        setProgress(0, message, 'error');
+    };
+    xhr.onerror = function() {
+        setBusy(false);
+        setProgress(0, 'Upload failed, the connection was lost', 'error');
+    };
+    xhr.send(file);
+}
+
+function startUrlUpdate() {
+    var url = document.getElementById('fwUrl').value.trim();
+    if (!url) {
+        showToast('Please enter an image URL', 'error');
+        return;
+    }
+    setBusy(true);
+    setProgress(0, 'Starting download...');
+    apiPost('/ota_url', {url : url, combined : document.getElementById('fwCombined').checked})
+        .then(function(data) {
+            if (!data.success) {
+                setBusy(false);
+                setProgress(0, data.message || 'Failed to start the update', 'error');
+                return;
+            }
+            startPolling();
+        })
+        .catch(function() {
+            setBusy(false);
+            setProgress(0, 'Failed to start the update', 'error');
+        });
+}
+
+apiGet('/ota_status').then(function(data) {
+    renderStatus(data);
+    if (data.state === 'running') {
+        setBusy(true);
+        startPolling();
+    }
+}).catch(function() {});
+</script>
+</body>
+</html>

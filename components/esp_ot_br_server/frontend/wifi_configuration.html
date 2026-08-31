@@ -1,0 +1,151 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Wi-Fi</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <h1 class="page-title">Wi-Fi</h1>
+    <p class="page-desc">Backbone network of the Thread Border Router</p>
+
+    <div class="card section">
+        <div class="card-header">Status</div>
+        <div class="info-row"><span class="info-label">Mode</span><span class="info-value" id="wifiMode">-</span></div>
+        <div class="info-row"><span class="info-label">Connection</span><span class="info-value" id="wifiState">-</span></div>
+        <div class="info-row"><span class="info-label">Configured network</span><span class="info-value" id="wifiSsid">-</span></div>
+        <div class="info-row"><span class="info-label">IPv4 address</span><span class="info-value" id="wifiIp">-</span></div>
+    </div>
+
+    <div class="card section">
+        <div class="card-header">Connect to a network</div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+            The credentials are stored in NVS. The device restarts to apply them and falls back to
+            the setup access point when it cannot connect.
+        </p>
+        <form id="wifiForm" onsubmit="return false">
+            <div class="form-group">
+                <label class="form-label">Network (SSID) *</label>
+                <input class="form-input" id="ssid" type="text" maxlength="31" required>
+                <div class="form-hint">Only 2.4 GHz networks are supported</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input class="form-input" id="password" type="password" maxlength="63">
+                <div class="form-hint">Leave empty for an open network</div>
+            </div>
+            <div class="flex-between">
+                <button type="button" class="btn btn-primary" id="saveBtn" onclick="saveWifi()">Save &amp; connect</button>
+                <button type="button" class="btn btn-secondary" id="scanBtn" onclick="scanWifi()">Scan</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card section hidden" id="scanCard">
+        <div class="card-header">Available networks</div>
+        <div id="scanResults"></div>
+    </div>
+</div>
+<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+
+<script src="/static/api.js"></script>
+<script>
+function renderStatus(data) {
+    document.getElementById('wifiMode').textContent =
+        data.provisioning ? 'Setup access point (' + data.softap_ssid + ')' : 'Station';
+    document.getElementById('wifiState').textContent = data.state || '-';
+    document.getElementById('wifiSsid').textContent = data.configured_ssid || 'none';
+    document.getElementById('wifiIp').textContent = data.ip || '-';
+    if (!document.getElementById('ssid').value && data.configured_ssid) {
+        document.getElementById('ssid').value = data.configured_ssid;
+    }
+}
+
+function loadStatus() {
+    apiGet('/wifi_status').then(renderStatus).catch(function() {});
+}
+
+function authLabel(mode) {
+    return mode === 0 ? 'open' : 'protected';
+}
+
+function scanWifi() {
+    var btn = document.getElementById('scanBtn');
+    var card = document.getElementById('scanCard');
+    var results = document.getElementById('scanResults');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    card.classList.remove('hidden');
+    results.innerHTML = '<div class="text-center"><div class="spinner" style="width:24px;height:24px;margin:8px auto"></div></div>';
+
+    apiGet('/scan').then(function(data) {
+        btn.disabled = false;
+        btn.textContent = 'Scan';
+        var aps = (data && data.aps) || [];
+        if (!aps.length) {
+            results.innerHTML = '<div class="text-muted text-center">No networks found</div>';
+            return;
+        }
+        aps.sort(function(a, b) { return b.rssi - a.rssi; });
+        var html = '<div class="link-list">';
+        for (var i = 0; i < aps.length; i++) {
+            var ssid = escapeHtml(aps[i].ssid);
+            html += '<div class="info-row"><span class="info-label">' +
+                    '<a href="#" onclick="selectSsid(this);return false">' + ssid + '</a></span>' +
+                    '<span class="info-value">' + aps[i].rssi + ' dBm, ' + authLabel(aps[i].authmode) + '</span></div>';
+        }
+        results.innerHTML = html + '</div>';
+    }).catch(function() {
+        btn.disabled = false;
+        btn.textContent = 'Scan';
+        results.innerHTML = '<div class="text-muted text-center">Scan failed</div>';
+    });
+}
+
+function selectSsid(el) {
+    document.getElementById('ssid').value = el.textContent;
+    document.getElementById('password').focus();
+}
+
+function saveWifi() {
+    var ssid = document.getElementById('ssid').value.trim();
+    if (!ssid) {
+        showToast('Please enter a network name', 'error');
+        return;
+    }
+    var btn = document.getElementById('saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    apiPost('/submit', {ssid : ssid, password : document.getElementById('password').value})
+        .then(function(data) {
+            btn.disabled = false;
+            btn.textContent = 'Save & connect';
+            if (!data.success) {
+                showToast(data.error || 'Failed to save the credentials', 'error');
+                return;
+            }
+            showToast(data.restart ? 'Saved, the device is restarting'
+                                   : 'Saved, connecting to ' + ssid,
+                      'success');
+        })
+        .catch(function() {
+            btn.disabled = false;
+            btn.textContent = 'Save & connect';
+            showToast('Failed to save the credentials', 'error');
+        });
+}
+
+loadStatus();
+setInterval(loadStatus, 5000);
+</script>
+</body>
+</html>
