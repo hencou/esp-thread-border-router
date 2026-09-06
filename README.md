@@ -35,6 +35,23 @@ When you switch to this version from an older build, remove the stale `sdkconfig
 new defaults (`OPENTHREAD_BR_AUTO_START`, `OPENTHREAD_BR_START_WEB`, `OPENTHREAD_BR_SOFTAP_SETUP`)
 are applied, or enable those three options in `idf.py menuconfig`.
 
+### Flashing with ESPConnect
+
+[ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) flashes a single merged image
+from the browser. Build it with:
+
+```bash
+. $IDF_PATH/export.sh
+./tools/make_esp_ot_br_factory.sh          # writes esp_ot_br_factory.bin
+WIN_DOWNLOADS=/mnt/c/Users/<name>/Downloads ./tools/make_esp_ot_br_factory.sh   # WSL: also copy it to Windows
+```
+
+Then in ESPConnect: connect the board, *Flash Tools → Flash Firmware*, select
+`esp_ot_br_factory.bin` at offset `0x0` with *Erase entire flash before writing* enabled. The image
+contains the bootloader, partition table, otadata, app, web GUI and RCP firmware, so nothing else
+has to be flashed — but erasing also wipes NVS, so Wi-Fi and the Thread dataset have to be set up
+again afterwards.
+
 ## Web GUI
 
 The web server runs on port 80 in both modes and always exposes the same pages.
