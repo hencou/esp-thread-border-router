@@ -2,36 +2,34 @@
 # Build a single merged flash image for ESPConnect / web-based flashing.
 #
 # Usage:
-#   ./tools/make_esp_ot_br_factory.sh
+#   ./tools/make_esp_ot_br_factory.sh [output.bin]
 #   WIN_DOWNLOADS=/mnt/c/Users/<name>/Downloads ./tools/make_esp_ot_br_factory.sh
 #                                         # also copies the merged bin to your Windows Downloads
 #
 # Prereqs:
-#   - ESP-IDF env loaded (`. ~/esp-idf/export.sh` or your esp-matter IDF environment)
-#   - `idf.py build` has already run (build/ must contain bootloader, PT, app, etc.)
+#   - ESP-IDF env loaded (`. ~/esp/esp-idf/export.sh`)
+#   - the project has been configured for its target (`idf.py set-target esp32s3`)
 
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
-OUT="${PROJECT_DIR}/esp_ot_br_factory.bin"
-
-if [[ ! -d "${BUILD_DIR}" ]]; then
-    echo "ERROR: no build/ directory found — run 'idf.py build' first" >&2
-    exit 1
-fi
-
-if [[ ! -f "${BUILD_DIR}/flash_args" ]]; then
-    echo "ERROR: build/flash_args is missing — run 'idf.py build' first" >&2
-    exit 1
-fi
+OUT="${1:-${PROJECT_DIR}/esp_ot_br_factory.bin}"
 
 if ! command -v idf.py >/dev/null 2>&1; then
-    echo "ERROR: idf.py not on PATH — source ESP-IDF first: . ~/esp-idf/export.sh" >&2
+    echo "ERROR: idf.py not on PATH — source ESP-IDF first: . ~/esp/esp-idf/export.sh" >&2
     exit 1
 fi
 
 cd "${PROJECT_DIR}"
+
+# merge-bin depends on the build target, so an out-of-date or missing build/ is rebuilt here.
+idf.py build
+
+if [[ ! -f "${BUILD_DIR}/flash_args" ]]; then
+    echo "ERROR: build/flash_args is missing after the build" >&2
+    exit 1
+fi
 
 # idf.py merge-bin reads build/flash_args and automatically picks up the
 # same files and offsets 'idf.py flash' would use (bootloader,
@@ -48,5 +46,11 @@ if [[ -n "${WIN_DOWNLOADS:-}" ]]; then
 fi
 
 echo
-echo "Next: open ESPConnect in Chrome, Flash Tools -> Flash Firmware,"
-echo "      offset 0x0, 'Erase entire flash before writing' = on."
+echo "Next: open https://thelastoutpostworkshop.github.io/ESPConnect/ in Chrome or Edge,"
+echo "      connect the board over USB, pick Flash Tools -> Flash Firmware,"
+echo "      select ${OUT##*/}, offset 0x0, 'Erase entire flash before writing' = on."
+echo
+echo "The merged image contains the bootloader, partition table, otadata, app,"
+echo "web GUI (web_storage) and RCP firmware, so nothing else has to be flashed."
+echo "Erasing the flash also clears NVS, so the Wi-Fi credentials and Thread"
+echo "dataset have to be configured again through the ESP-ThreadBR-XXXX setup AP."
