@@ -20,7 +20,6 @@
 #include "esp_br_web_base.h"
 #include "esp_br_web_ota.h"
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
-#include "esp_br_wifi_config.h"
 #include "esp_br_wifi_config_handlers.h"
 #endif
 #include "esp_check.h"
@@ -1509,14 +1508,6 @@ static bool str_ends_with(const char *str, const char *suffix)
  */
 static esp_err_t default_urls_get_handler(httpd_req_t *req)
 {
-#if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
-    // Check if this is a WiFi config request (when WiFi config mode is active)
-    if (esp_br_wifi_config_is_active()) {
-        // Let WiFi config server handle it
-        return ESP_OK;
-    }
-#endif
-
     struct http_parser_url url;
     ESP_RETURN_ON_ERROR(http_parser_parse_url(req->uri, strlen(req->uri), 0, &url), WEB_TAG, "Failed to parse url");
     request_url_t info =
