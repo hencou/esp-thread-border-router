@@ -58,7 +58,7 @@
 
 #define TAG "esp_ot_br"
 
-#if CONFIG_EXAMPLE_CONNECT_WIFI && CONFIG_OPENTHREAD_BR_AUTO_START
+#if CONFIG_EXAMPLE_CONNECT_WIFI && CONFIG_OPENTHREAD_BR_AUTO_START && !CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
 /**
  * @brief Save Wi-Fi configuration to NVS and connect
  *
@@ -116,21 +116,21 @@ static void ot_br_init(void *ctx)
         ESP_LOGI(TAG, "Connected to Wi-Fi: %s", wifi_ssid);
     } else {
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
-        // SoftAP Wi-Fi configuration mode
+        // SoftAP Wi-Fi configuration mode. The portal stores the credentials in NVS itself and the
+        // device reboots to use them, so the SoftAP is never torn down underneath the running lwIP
+        // interfaces and the station connection starts from a clean Wi-Fi state.
         esp_br_wifi_config_start();
+        esp_br_wifi_config_get_configured_wifi(NULL, 0, NULL, 0, 0);
 
-        // Wait for user to configure Wi-Fi via web interface (wait forever)
-        esp_br_wifi_config_get_configured_wifi(wifi_ssid, sizeof(wifi_ssid), wifi_password, sizeof(wifi_password), 0);
-
-        // Stop SoftAP mode
-        esp_br_wifi_config_stop();
+        ESP_LOGI(TAG, "Wi-Fi credentials stored, rebooting to connect");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
 #else
         // Standard Wi-Fi connection mode - get from Kconfig
         strncpy(wifi_ssid, CONFIG_EXAMPLE_WIFI_SSID, sizeof(wifi_ssid) - 1);
         wifi_ssid[sizeof(wifi_ssid) - 1] = '\0';
         strncpy(wifi_password, CONFIG_EXAMPLE_WIFI_PASSWORD, sizeof(wifi_password) - 1);
         wifi_password[sizeof(wifi_password) - 1] = '\0';
-#endif
 
         // Connect to Wi-Fi and save to NVS
         if (!wifi_config_save_and_connect(wifi_ssid, wifi_password)) {
@@ -139,6 +139,7 @@ static void ot_br_init(void *ctx)
             ESP_LOGE(TAG, "Rebooting ... to try again");
             esp_restart();
         }
+#endif
     }
 #elif CONFIG_EXAMPLE_CONNECT_ETHERNET
     // Ethernet connection mode

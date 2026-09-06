@@ -304,6 +304,13 @@ static void wifi_config_stop_softap(void)
         }
     }
 
+    // The AP netif must only be destroyed once the Wi-Fi driver no longer serves it: lwIP still
+    // transmits (IGMP leave, mDNS goodbye) while the interface is being removed, and doing that
+    // through a detached driver dereferences a null transmit callback.
+    if (s_wifi_stack_owned) {
+        esp_wifi_stop();
+    }
+
     if (s_ap_netif) {
         esp_netif_dhcps_stop(s_ap_netif);
         esp_netif_destroy_default_wifi(s_ap_netif);
@@ -311,7 +318,6 @@ static void wifi_config_stop_softap(void)
     }
 
     if (s_wifi_stack_owned) {
-        esp_wifi_stop();
         esp_wifi_deinit();
         s_wifi_stack_owned = false;
     }
@@ -484,17 +490,8 @@ esp_err_t esp_br_wifi_config_submit_post_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
 
-    if (s_wifi_config_mode) {
-        // Provisioning mode: hand the credentials over to the border router startup sequence.
-        if (s_wifi_event_group) {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_CONFIGURED_BIT);
-        }
-        httpd_resp_send(req, "{\"success\":true,\"restart\":false}", HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
-    }
-
-    // Already connected as station: persist the new credentials and restart to apply them. If they
-    // turn out to be wrong, the border router falls back to the provisioning SoftAP on the next boot.
+    // Persist the credentials right away and apply them with a restart. If they turn out to be
+    // wrong, the border router falls back to the provisioning SoftAP on the next boot.
     esp_err_t err = esp_ot_wifi_config_set_ssid(s_configured_ssid);
     if (err == ESP_OK) {
         err = esp_ot_wifi_config_set_password(s_configured_password);
@@ -506,6 +503,15 @@ esp_err_t esp_br_wifi_config_submit_post_handler(httpd_req_t *req)
     }
 
     httpd_resp_send(req, "{\"success\":true,\"restart\":true}", HTTPD_RESP_USE_STRLEN);
+
+    if (s_wifi_config_mode) {
+        // Provisioning mode: the border router startup sequence owns the restart.
+        if (s_wifi_event_group) {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_CONFIGURED_BIT);
+        }
+        return ESP_OK;
+    }
+
     if (xTaskCreate(wifi_config_delayed_restart_task, "wifi_restart", 2048, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(WIFI_CONFIG_TAG, "Failed to create restart task");
     }
