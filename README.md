@@ -23,7 +23,8 @@ On top of the upstream example it provides:
 Download the merged factory image (`esp_ot_br_factory.bin`) for your board from the
 [Releases page](https://github.com/hencou/esp-thread-border-router/releases). It contains the
 bootloader, partition table, otadata, application, web GUI and the RCP firmware, so it is the only
-file you need.
+file you need for a first installation. A release also contains `esp_ot_br_ota.bin`, the update
+bundle for devices that are already running (see [Firmware updates](#firmware-updates)).
 
 ### 2. Flash it with ESPConnect
 
@@ -72,14 +73,25 @@ exposes the same pages: *Dashboard*, *Management* (Network, Commissioner, Addres
 
 *System → Firmware* shows the running version and the target OTA partition and offers:
 
-- **Upload an image**: send the application binary (`esp_ot_br.bin` from a release or your own
-  build) straight from the browser.
+- **Upload an image**: send `esp_ot_br_ota.bin` (the update bundle from a release) straight from
+  the browser. The bundle carries the application, the web GUI and the RCP firmware, so one upload
+  updates everything that changed. A plain application binary (`esp_ot_br.bin`) is accepted too,
+  but then the web GUI keeps the pages of the previous version.
 - **Update from a URL**: the device downloads the image itself (HTTPS is verified against the
-  certificate bundle). Tick *Combined host + RCP image* for a `ota_with_rcp_image` bundle created
-  with `CREATE_OTA_IMAGE_WITH_RCP_FW`; the RCP is then updated on the next boot.
+  certificate bundle), again either a bundle or a plain application image. Tick *Combined host +
+  RCP image* for a `ota_with_rcp_image` file created with `CREATE_OTA_IMAGE_WITH_RCP_FW`.
 
-The device restarts automatically after a successful update. Only one update can run at a time and
-images larger than the OTA partition are rejected before anything is written.
+Every part of a bundle is checked against its SHA-256 while it is written, and the boot partition
+is only switched once the whole bundle has been written, so a failed update leaves the device on
+its current firmware. The device restarts automatically after a successful update and only one
+update can run at a time.
+
+Build the bundle from your own build with:
+
+```bash
+idf.py build
+./tools/make_ota_bundle.py            # writes esp_ot_br_ota.bin
+```
 
 ### Remote console
 
@@ -116,8 +128,8 @@ To produce the merged factory image that ESPConnect flashes (the same file as in
 
 ```bash
 . $IDF_PATH/export.sh
-./tools/make_esp_ot_br_factory.sh          # writes esp_ot_br_factory.bin
-WIN_DOWNLOADS=/mnt/c/Users/<name>/Downloads ./tools/make_esp_ot_br_factory.sh   # WSL: also copy it to Windows
+./tools/make_esp_ot_br_factory.sh          # writes esp_ot_br_factory.bin and esp_ot_br_ota.bin
+WIN_DOWNLOADS=/mnt/c/Users/<name>/Downloads ./tools/make_esp_ot_br_factory.sh   # WSL: also copy them to Windows
 ```
 
 ## Reference: upstream example documentation

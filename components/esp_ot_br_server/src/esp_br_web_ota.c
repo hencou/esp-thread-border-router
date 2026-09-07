@@ -6,14 +6,15 @@
 
 #include "esp_br_web_ota.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
+#include "esp_br_web_ota_bundle.h"
 #include "esp_http_client.h"
-#include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -30,10 +31,10 @@
 #endif
 
 #define OTA_TAG "web_ota"
-#define OTA_RECV_BUFFER_SIZE 2048
 #define OTA_URL_MAX_LEN 512
 #define OTA_MESSAGE_MAX_LEN 96
 #define OTA_REBOOT_DELAY_MS 1500
+#define OTA_MAX_REDIRECTS 5
 
 typedef enum {
     OTA_STATE_IDLE,
@@ -198,6 +199,19 @@ esp_err_t esp_br_web_ota_status_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/** @brief Read the uploaded image from the request body. */
+static int ota_request_read(void *ctx, char *buf, size_t len)
+{
+    httpd_req_t *req = (httpd_req_t *)ctx;
+
+    while (true) {
+        int received = httpd_req_recv(req, buf, len);
+        if (received != HTTPD_SOCK_ERR_TIMEOUT) {
+            return received;
+        }
+    }
+}
+
 esp_err_t esp_br_web_ota_upload_post_handler(httpd_req_t *req)
 {
     if (req->content_len == 0) {
@@ -209,48 +223,71 @@ esp_err_t esp_br_web_ota_upload_post_handler(httpd_req_t *req)
         return ota_send_conflict(req);
     }
 
-    esp_err_t ret = ESP_OK;
-    esp_ota_handle_t ota_handle = 0;
-    char *buffer = NULL;
-    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
-
-    ESP_GOTO_ON_FALSE(update_partition != NULL, ESP_ERR_NOT_FOUND, exit, OTA_TAG, "No OTA partition available");
-    ESP_GOTO_ON_FALSE(req->content_len <= update_partition->size, ESP_ERR_INVALID_SIZE, exit, OTA_TAG,
-                      "Firmware image of %u bytes does not fit in the %u-byte OTA partition",
-                      (unsigned)req->content_len, (unsigned)update_partition->size);
-
-    buffer = malloc(OTA_RECV_BUFFER_SIZE);
-    ESP_GOTO_ON_FALSE(buffer != NULL, ESP_ERR_NO_MEM, exit, OTA_TAG, "Failed to allocate receive buffer");
-
     s_ota_total = req->content_len;
-    ESP_GOTO_ON_ERROR(esp_ota_begin(update_partition, req->content_len, &ota_handle), exit, OTA_TAG,
-                      "Failed to begin OTA");
+    esp_err_t ret = esp_br_ota_apply_stream(NULL, 0, ota_request_read, req, req->content_len, &s_ota_written,
+                                            &s_ota_total);
 
-    while (s_ota_written < s_ota_total) {
-        int received = httpd_req_recv(req, buffer, OTA_RECV_BUFFER_SIZE);
-        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
-        }
-        ESP_GOTO_ON_FALSE(received > 0, ESP_FAIL, exit, OTA_TAG, "Failed to receive firmware image");
-        ESP_GOTO_ON_ERROR(esp_ota_write(ota_handle, buffer, received), exit, OTA_TAG, "Failed to write firmware image");
-        s_ota_written += received;
-    }
-
-    ret = esp_ota_end(ota_handle);
-    ota_handle = 0;
-    ESP_GOTO_ON_ERROR(ret, exit, OTA_TAG, "Failed to verify firmware image");
-    ESP_GOTO_ON_ERROR(esp_ota_set_boot_partition(update_partition), exit, OTA_TAG, "Failed to set boot partition");
-
-exit:
-    free(buffer);
-    if (ret != ESP_OK && ota_handle) {
-        esp_ota_abort(ota_handle);
-    }
     ota_finish(ret, ret == ESP_OK ? "Firmware uploaded, restarting" : "Firmware upload failed");
     ota_send_json_result(req, ret, s_ota_message);
     if (ret == ESP_OK) {
         ota_schedule_reboot();
     }
+    return ret;
+}
+
+/** @brief Read the downloaded image, telling a closed connection apart from the end of the body. */
+static int ota_download_read(void *ctx, char *buf, size_t len)
+{
+    esp_http_client_handle_t client = (esp_http_client_handle_t)ctx;
+    int received = esp_http_client_read(client, buf, len);
+
+    if (received == 0 && !esp_http_client_is_complete_data_received(client) &&
+        (errno == ENOTCONN || errno == ECONNRESET || errno == ECONNABORTED)) {
+        return -1;
+    }
+    return received;
+}
+
+/** @brief Open the download and follow redirects, as release downloads are usually redirected. */
+static esp_err_t ota_download_open(esp_http_client_handle_t client, int *content_length)
+{
+    for (int attempt = 0; attempt < OTA_MAX_REDIRECTS + 1; attempt++) {
+        ESP_RETURN_ON_ERROR(esp_http_client_open(client, 0), OTA_TAG, "Failed to open the download");
+
+        int length = esp_http_client_fetch_headers(client);
+        int status = esp_http_client_get_status_code(client);
+        if (length < 0) {
+            return ESP_FAIL;
+        }
+        if (status == HttpStatus_MovedPermanently || status == HttpStatus_Found ||
+            status == HttpStatus_TemporaryRedirect || status == HttpStatus_PermanentRedirect) {
+            ESP_RETURN_ON_ERROR(esp_http_client_set_redirection(client), OTA_TAG, "Failed to follow the redirect");
+            esp_http_client_close(client);
+            continue;
+        }
+        ESP_RETURN_ON_FALSE(status == HttpStatus_Ok || status == HttpStatus_PartialContent, ESP_FAIL, OTA_TAG,
+                            "The server answered with HTTP %d", status);
+        *content_length = length;
+        return ESP_OK;
+    }
+    return ESP_FAIL;
+}
+
+static esp_err_t ota_download_image(esp_http_client_config_t *http_config)
+{
+    esp_err_t ret = ESP_OK;
+    int content_length = 0;
+    esp_http_client_handle_t client = esp_http_client_init(http_config);
+
+    ESP_RETURN_ON_FALSE(client != NULL, ESP_FAIL, OTA_TAG, "Failed to create the HTTP client");
+    ESP_GOTO_ON_ERROR(ota_download_open(client, &content_length), exit, OTA_TAG, "Failed to start the download");
+
+    s_ota_total = (content_length > 0) ? (size_t)content_length : 0;
+    ret = esp_br_ota_apply_stream(NULL, 0, ota_download_read, client, s_ota_total, &s_ota_written, &s_ota_total);
+
+exit:
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
     return ret;
 }
 
@@ -277,26 +314,7 @@ static void ota_url_task(void *arg)
         ret = ESP_ERR_NOT_SUPPORTED;
 #endif
     } else {
-        esp_https_ota_config_t ota_config = {
-            .http_config = &http_config,
-        };
-        esp_https_ota_handle_t ota_handle = NULL;
-        ret = esp_https_ota_begin(&ota_config, &ota_handle);
-        if (ret == ESP_OK) {
-            s_ota_total = esp_https_ota_get_image_size(ota_handle);
-            do {
-                ret = esp_https_ota_perform(ota_handle);
-                s_ota_written = esp_https_ota_get_image_len_read(ota_handle);
-            } while (ret == ESP_ERR_HTTPS_OTA_IN_PROGRESS);
-
-            if (ret == ESP_OK && !esp_https_ota_is_complete_data_received(ota_handle)) {
-                ret = ESP_FAIL;
-            }
-            esp_err_t finish_err = esp_https_ota_finish(ota_handle);
-            if (ret == ESP_OK) {
-                ret = finish_err;
-            }
-        }
+        ret = ota_download_image(&http_config);
     }
 
     ota_finish(ret, ret == ESP_OK ? "Firmware downloaded, restarting" : "Firmware download failed");
