@@ -40,8 +40,13 @@ idf.py merge-bin -o "${OUT}"
 SIZE=$(stat -c %s "${OUT}")
 printf "\nMerged image: %s (%s bytes)\n" "${OUT}" "${SIZE}"
 
+# The same build also produces the OTA bundle, so a release can offer both a factory image for
+# ESPConnect and an image that is uploaded on the Firmware page of an already running device.
+BUNDLE="$(dirname "${OUT}")/esp_ot_br_ota.bin"
+"${PROJECT_DIR}/tools/make_ota_bundle.py" --build-dir "${BUILD_DIR}" -o "${BUNDLE}"
+
 if [[ -n "${WIN_DOWNLOADS:-}" ]]; then
-    cp "${OUT}" "${WIN_DOWNLOADS}/"
+    cp "${OUT}" "${BUNDLE}" "${WIN_DOWNLOADS}/"
     echo "Copied to ${WIN_DOWNLOADS}/"
 fi
 

@@ -21,17 +21,19 @@ extern "C" {
 esp_err_t esp_br_web_ota_status_get_handler(httpd_req_t *req);
 
 /**
- * @brief Receive a firmware image in the request body and write it to the inactive OTA partition.
+ * @brief Receive an update image in the request body and write it to flash.
  *
- * The device reboots into the new firmware once the image has been verified.
+ * The image is either a plain application image or an update bundle that also carries the web GUI
+ * and the RCP firmware. The device reboots once the image has been verified.
  */
 esp_err_t esp_br_web_ota_upload_post_handler(httpd_req_t *req);
 
 /**
- * @brief Download a firmware image from a URL and write it to the inactive OTA partition.
+ * @brief Download an update image from a URL and write it to flash.
  *
- * Body: {"url": "https://host/path/firmware.bin", "combined": false}. A combined image contains
- * both the host and the RCP firmware, as produced by the border router SDK.
+ * Body: {"url": "https://host/path/image.bin", "combined": false}. The downloaded image may be a
+ * plain application image or an update bundle. A combined image is the RCP-SDK format that carries
+ * the host and the RCP firmware and is handled by esp_br_http_ota().
  */
 esp_err_t esp_br_web_ota_url_post_handler(httpd_req_t *req);
 

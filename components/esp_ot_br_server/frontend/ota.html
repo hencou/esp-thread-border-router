@@ -30,11 +30,13 @@
     <div class="card section">
         <div class="card-header">Upload an image</div>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
-            Select the application binary (<code>esp_ot_br.bin</code>) built for this board. The
-            device restarts automatically after a successful update.
+            Select an update bundle (<code>esp_ot_br_ota.bin</code>, built with
+            <code>tools/make_ota_bundle.py</code>) to update the application, this web GUI and the
+            RCP firmware in one go, or a plain application binary (<code>esp_ot_br.bin</code>) to
+            update the application only. The device restarts after a successful update.
         </p>
         <div class="form-group">
-            <label class="form-label">Firmware file *</label>
+            <label class="form-label">Update file *</label>
             <input class="form-input" id="fwFile" type="file" accept=".bin">
             <div class="form-hint" id="fwSizeHint"></div>
         </div>
@@ -45,7 +47,8 @@
         <div class="card-header">Update from a URL</div>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
             The device downloads the image itself, so it needs internet access. HTTPS is verified
-            against the built-in certificate bundle.
+            against the built-in certificate bundle. Both update bundles and plain application
+            images are accepted.
         </p>
         <div class="form-group">
             <label class="form-label">Image URL *</label>
@@ -97,7 +100,7 @@ function renderStatus(data) {
     document.getElementById('fwTarget').textContent =
         data.update_partition ? data.update_partition + ' (' + Math.round(partitionSize / 1024) + ' KiB)' : '-';
     document.getElementById('fwSizeHint').textContent =
-        partitionSize ? 'Maximum image size: ' + Math.round(partitionSize / 1024) + ' KiB' : '';
+        partitionSize ? 'Maximum application image size: ' + Math.round(partitionSize / 1024) + ' KiB' : '';
     if (data.combined_supported) {
         document.getElementById('combinedGroup').classList.remove('hidden');
     }
@@ -136,14 +139,23 @@ function uploadFirmware() {
         return;
     }
     var file = input.files[0];
-    if (partitionSize && file.size > partitionSize) {
-        showToast('The image is larger than the OTA partition', 'error');
-        return;
-    }
 
     setBusy(true);
     setProgress(0, 'Uploading ' + file.name + '...');
+    // A bundle is larger than the OTA partition because it also carries the web GUI and the RCP
+    // firmware, so only plain application images are checked against the partition size.
+    file.slice(0, 8).arrayBuffer().then(function(head) {
+        var magic = String.fromCharCode.apply(null, new Uint8Array(head));
+        if (magic !== 'OTBRBNDL' && partitionSize && file.size > partitionSize) {
+            setBusy(false);
+            setProgress(0, 'The application image is larger than the OTA partition', 'error');
+            return;
+        }
+        sendUpdateFile(file);
+    });
+}
 
+function sendUpdateFile(file) {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/ota_upload');
     xhr.upload.onprogress = function(e) {
