@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "esp_err.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,6 +21,15 @@ extern "C" {
  * @param[in] base_path is the virtual file path of web server
  */
 void esp_br_web_start(char *base_path);
+
+/**
+ * @brief Take ownership of the OpenThread CLI so that commands can also be run from the web GUI.
+ *
+ * Recreates the CLI interpreter, so it has to be called right after the OpenThread stack has
+ * started and before any component registers its own CLI commands. The serial console keeps
+ * working; its `ot ...` command is re-registered by this function.
+ */
+esp_err_t esp_br_web_console_take_over_cli(void);
 
 /** Size of an ePSKc TAP string buffer: 8 digits + checksum digit + '\0' */
 #define ESP_BR_EPSKC_TAP_LEN 10

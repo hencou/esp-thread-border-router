@@ -145,7 +145,8 @@ var pages = [
     label : 'System',
     children : [
       {href : '/wifi_configuration.html', label : 'Wi-Fi'},
-      {href : '/ota.html', label : 'Firmware'}
+      {href : '/ota.html', label : 'Firmware'},
+      {href : '/console.html', label : 'Console'}
     ]
   },
   {href : '/about.html', label : 'About'}

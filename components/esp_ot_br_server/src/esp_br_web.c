@@ -18,6 +18,7 @@
 #include "esp_br_web.h"
 #include "esp_br_web_api.h"
 #include "esp_br_web_base.h"
+#include "esp_br_web_console.h"
 #include "esp_br_web_ota.h"
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
 #include "esp_br_wifi_config_handlers.h"
@@ -273,6 +274,18 @@ static esp_err_t esp_otbr_delete_ipaddr_post_handler(httpd_req_t *req);
 /* Handlers that stay available in every network mode: firmware updates and, when the SoftAP setup
    flow is enabled, Wi-Fi provisioning including the captive portal redirects. */
 static httpd_uri_t s_setup_handlers[] = {
+    {
+        .uri = "/console_log",
+        .method = HTTP_GET,
+        .handler = esp_br_web_console_log_get_handler,
+        .user_ctx = NULL,
+    },
+    {
+        .uri = "/console_command",
+        .method = HTTP_POST,
+        .handler = esp_br_web_console_command_post_handler,
+        .user_ctx = NULL,
+    },
     {
         .uri = "/ota_status",
         .method = HTTP_GET,
@@ -1669,6 +1682,7 @@ void esp_br_web_start(char *base_path)
     // portal, the firmware update page and the Thread dataset API are served by a single HTTP
     // server in SoftAP mode as well as in station mode.
     if (!is_br_web_server_started) {
+        esp_br_web_console_init();
         if (start_esp_br_http_server(base_path, "0.0.0.0") != NULL) {
             is_br_web_server_started = true;
         } else {
