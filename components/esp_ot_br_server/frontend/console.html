@@ -1,0 +1,176 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Console</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+    <style>
+    .console-out {
+        background: #111827;
+        color: #e5e7eb;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border-radius: 6px;
+        padding: 12px;
+        height: 320px;
+        overflow-y: auto;
+        margin: 0;
+    }
+    .console-input-row { display: flex; gap: 8px; align-items: center; }
+    .console-input-row .form-input { flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .console-prefix { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <h1 class="page-title">Console</h1>
+    <p class="page-desc">Run OpenThread CLI commands and read the device log remotely</p>
+
+    <div class="card section">
+        <div class="card-header">OpenThread CLI</div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+            The same commands as on the serial console, without the <code>ot</code> prefix, for
+            example <code>state</code>, <code>netdata show</code> or <code>br omrprefix</code>.
+            Use the arrow keys for the command history.
+        </p>
+        <div class="form-group console-input-row">
+            <span class="console-prefix">&gt;</span>
+            <input class="form-input" id="cmdInput" type="text" placeholder="netdata show"
+                   autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn-primary" id="runBtn" onclick="runCommand()">Run</button>
+        </div>
+        <pre class="console-out" id="cmdOut"></pre>
+        <div class="mt-8">
+            <button type="button" class="btn" onclick="clearOutput()">Clear</button>
+            <button type="button" class="btn" onclick="runNamed('help')">help</button>
+            <button type="button" class="btn" onclick="runNamed('state')">state</button>
+            <button type="button" class="btn" onclick="runNamed('netdata show')">netdata show</button>
+            <button type="button" class="btn" onclick="runNamed('br state')">br state</button>
+        </div>
+    </div>
+
+    <div class="card section">
+        <div class="card-header">Device log</div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+            The most recent log lines, buffered on the device. Older lines are dropped.
+        </p>
+        <div class="form-group">
+            <label class="form-check"><input type="checkbox" id="logFollow" checked onchange="toggleFollow()">
+                Auto-refresh</label>
+        </div>
+        <pre class="console-out" id="logOut"></pre>
+        <div class="mt-8">
+            <button type="button" class="btn" onclick="fetchLog()">Refresh</button>
+            <button type="button" class="btn" onclick="clearLog()">Clear view</button>
+        </div>
+    </div>
+</div>
+<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+
+<script src="/static/api.js"></script>
+<script>
+var cmdHistory = [];
+var historyPos = 0;
+var logSeq = 0;
+var logTimer = null;
+
+function appendOutput(text) {
+    var out = document.getElementById('cmdOut');
+    out.textContent += text;
+    out.scrollTop = out.scrollHeight;
+}
+
+function clearOutput() { document.getElementById('cmdOut').textContent = ''; }
+
+function clearLog() { document.getElementById('logOut').textContent = ''; }
+
+function runNamed(command) {
+    document.getElementById('cmdInput').value = command;
+    runCommand();
+}
+
+function runCommand() {
+    var input = document.getElementById('cmdInput');
+    var command = input.value.trim();
+    if (!command) {
+        return;
+    }
+    if (cmdHistory[cmdHistory.length - 1] !== command) {
+        cmdHistory.push(command);
+    }
+    historyPos = cmdHistory.length;
+    input.value = '';
+
+    var button = document.getElementById('runBtn');
+    button.disabled = true;
+    appendOutput('> ' + command + '\n');
+    apiPost('/console_command', {command : command})
+        .then(function(data) {
+            button.disabled = false;
+            appendOutput((data.output || '') + (data.truncated ? '\n[output truncated]\n' : ''));
+            if (!data.success) {
+                showToast(data.output || 'The command failed', 'error');
+            }
+        })
+        .catch(function() {
+            button.disabled = false;
+            appendOutput('[the device did not answer]\n');
+        });
+}
+
+function fetchLog() {
+    apiGet('/console_log?after=' + logSeq)
+        .then(function(data) {
+            logSeq = data.seq || 0;
+            var out = document.getElementById('logOut');
+            var atBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 20;
+            if (data.dropped) {
+                out.textContent += '\n[' + data.dropped + ' bytes of log dropped]\n';
+            }
+            out.textContent += data.log || '';
+            if (atBottom) {
+                out.scrollTop = out.scrollHeight;
+            }
+        })
+        .catch(function() {});
+}
+
+function toggleFollow() {
+    if (logTimer) {
+        clearInterval(logTimer);
+        logTimer = null;
+    }
+    if (document.getElementById('logFollow').checked) {
+        logTimer = setInterval(fetchLog, 2000);
+    }
+}
+
+document.getElementById('cmdInput').addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') {
+        runCommand();
+    } else if (event.key === 'ArrowUp' && historyPos > 0) {
+        historyPos--;
+        this.value = cmdHistory[historyPos];
+        event.preventDefault();
+    } else if (event.key === 'ArrowDown' && historyPos < cmdHistory.length - 1) {
+        historyPos++;
+        this.value = cmdHistory[historyPos];
+        event.preventDefault();
+    }
+});
+
+fetchLog();
+toggleFollow();
+</script>
+</body>
+</html>

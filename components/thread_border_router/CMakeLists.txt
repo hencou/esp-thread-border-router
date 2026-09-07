@@ -9,6 +9,6 @@ idf_component_register(SRC_DIRS "src"
                        REQUIRES "${requires}"
 )
 
-if(CONFIG_OPENTHREAD_BR_SOFTAP_SETUP)
+if(CONFIG_OPENTHREAD_BR_SOFTAP_SETUP OR CONFIG_OPENTHREAD_BR_START_WEB)
     idf_component_optional_requires(PRIVATE esp_ot_br_server)
 endif()

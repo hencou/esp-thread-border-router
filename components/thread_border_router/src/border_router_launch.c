@@ -29,6 +29,9 @@
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
 #include "esp_br_wifi_config.h"
 #endif
+#if CONFIG_OPENTHREAD_BR_START_WEB
+#include "esp_br_web.h"
+#endif
 #include "openthread/backbone_router_ftd.h"
 #include "openthread/border_router.h"
 #include "openthread/cli.h"
@@ -198,6 +201,10 @@ void launch_openthread_border_router(const esp_openthread_config_t *config,
 #endif
 
     ESP_ERROR_CHECK(esp_openthread_start(config));
+#if CONFIG_OPENTHREAD_CLI && CONFIG_OPENTHREAD_BR_START_WEB
+    // Recreates the CLI interpreter, so it has to run before the commands below are registered
+    ESP_ERROR_CHECK(esp_br_web_console_take_over_cli());
+#endif
 #if CONFIG_AUTO_UPDATE_RCP
     esp_ot_update_rcp_if_different();
 #endif

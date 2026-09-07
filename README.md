@@ -1,23 +1,100 @@
-# OpenThread Border Router Example
+# ESP32 Thread Border Router
 
-## Overview
-
-This example demonstrates an [OpenThread border router](https://openthread.io/guides/border-router).
+An [OpenThread border router](https://openthread.io/guides/border-router) for the ESP Thread Border
+Router Board (ESP32-S3 host + ESP32-H2 RCP), managed entirely from a web GUI: Thread network and
+dataset/TLVs, commissioning, topology, addresses, Wi-Fi, firmware updates and a remote console.
 
 This repository is standalone: the `esp_ot_br_server`, `esp_br_http_ota` and `thread_border_router`
 components of [esp-thread-br](https://github.com/espressif/esp-thread-br) are vendored under
-`components/`, so only ESP-IDF is required to build it.
+`components/`, so only ESP-IDF is required if you want to build it yourself.
 
 On top of the upstream example it provides:
 
-- A **Firmware** page in the web GUI to update the border router from a browser upload or from a URL.
-- A **Wi-Fi** page in the web GUI to scan for and switch to another network.
+- A **Firmware** page to update the border router from a browser upload or from a URL.
+- A **Wi-Fi** page to scan for and switch to another network.
+- A **Console** page with the OpenThread CLI and the device log, so no serial cable is needed.
 - A setup access point (`ESP-ThreadBR-XXXX`, http://192.168.4.1) that serves the *complete* web GUI,
   so the Thread dataset/TLVs can already be configured before the device is on your Wi-Fi network.
 
-## Getting the code and building it
+## Installation
 
-Tested with ESP-IDF v5.5.4 and v5.5.5.
+### 1. Download the firmware
+
+Download the merged factory image (`esp_ot_br_factory.bin`) for your board from the
+[Releases page](https://github.com/hencou/esp-thread-border-router/releases). It contains the
+bootloader, partition table, otadata, application, web GUI and the RCP firmware, so it is the only
+file you need.
+
+### 2. Flash it with ESPConnect
+
+[ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) flashes from the browser (Chrome
+or Edge, no installation):
+
+1. Connect the board over USB and open https://thelastoutpostworkshop.github.io/ESPConnect/.
+2. *Connect* and select the serial port of the board.
+3. *Flash Tools → Flash Firmware*, select `esp_ot_br_factory.bin` and set the offset to `0x0`.
+4. Enable *Erase entire flash before writing* for a first installation or when you want to start
+   clean. That also wipes NVS, so the stored Wi-Fi credentials and Thread dataset are lost.
+5. Flash and reset the board.
+
+Later updates do not need ESPConnect: use *System → Firmware* in the web GUI.
+
+### 3. First start: Wi-Fi setup
+
+1. Without usable Wi-Fi credentials the device starts the open access point `ESP-ThreadBR-XXXX`.
+2. Connect to it; the captive portal opens http://192.168.4.1/wifi_configuration.html (open it
+   manually if your device does not show the portal).
+3. Pick your network, enter the password and save. The credentials are stored in NVS and the device
+   reboots to connect as a station.
+4. If the connection fails, the setup access point comes back up so you can correct it.
+
+### 4. Find the device on your network
+
+After it has joined your Wi-Fi, the GUI is served on port 80 at the address handed out by your
+router. Look the lease up in your router, or use the hostname published over mDNS
+(`http://esp-ot-br.local`). The serial log and the Console page both print the address as
+`Web server reachable at http://<ip>`.
+
+### 5. Connect it to a Thread network
+
+Either let this border router form its own network (*Management → Network*), or join an existing
+one by pasting the Active Operational Dataset TLV of that network in the same page. When Home
+Assistant owns the network it is easier the other way around: add the OpenThread Border Router
+integration in Home Assistant with the URL of this device, so Home Assistant pushes its dataset.
+
+## Web GUI
+
+The web server runs on port 80 in setup (SoftAP) mode as well as in station mode, and always
+exposes the same pages: *Dashboard*, *Management* (Network, Commissioner, Addresses, Tools),
+*Topology*, *System* (Wi-Fi, Firmware, Console) and *About*.
+
+### Firmware updates
+
+*System → Firmware* shows the running version and the target OTA partition and offers:
+
+- **Upload an image**: send the application binary (`esp_ot_br.bin` from a release or your own
+  build) straight from the browser.
+- **Update from a URL**: the device downloads the image itself (HTTPS is verified against the
+  certificate bundle). Tick *Combined host + RCP image* for a `ota_with_rcp_image` bundle created
+  with `CREATE_OTA_IMAGE_WITH_RCP_FW`; the RCP is then updated on the next boot.
+
+The device restarts automatically after a successful update. Only one update can run at a time and
+images larger than the OTA partition are rejected before anything is written.
+
+### Remote console
+
+*System → Console* is the equivalent of the serial console:
+
+- Run OpenThread CLI commands (without the `ot` prefix used on the serial console), for example
+  `state`, `netdata show`, `br omrprefix` or `help`, and read their output in the browser.
+- Follow the most recent device log, which is buffered on the device; older lines are dropped.
+
+Commands run one at a time and time out after 15 seconds. The serial console keeps working exactly
+as before.
+
+## Building from source (optional)
+
+Only needed if you want to change the firmware. Tested with ESP-IDF v5.5.4 and v5.5.5.
 
 ```bash
 git clone https://github.com/hencou/esp-thread-border-router.git
@@ -35,10 +112,7 @@ When you switch to this version from an older build, remove the stale `sdkconfig
 new defaults (`OPENTHREAD_BR_AUTO_START`, `OPENTHREAD_BR_START_WEB`, `OPENTHREAD_BR_SOFTAP_SETUP`)
 are applied, or enable those three options in `idf.py menuconfig`.
 
-### Flashing with ESPConnect
-
-[ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) flashes a single merged image
-from the browser. Build it with:
+To produce the merged factory image that ESPConnect flashes (the same file as in a release):
 
 ```bash
 . $IDF_PATH/export.sh
@@ -46,38 +120,7 @@ from the browser. Build it with:
 WIN_DOWNLOADS=/mnt/c/Users/<name>/Downloads ./tools/make_esp_ot_br_factory.sh   # WSL: also copy it to Windows
 ```
 
-Then in ESPConnect: connect the board, *Flash Tools → Flash Firmware*, select
-`esp_ot_br_factory.bin` at offset `0x0` with *Erase entire flash before writing* enabled. The image
-contains the bootloader, partition table, otadata, app, web GUI and RCP firmware, so nothing else
-has to be flashed — but erasing also wipes NVS, so Wi-Fi and the Thread dataset have to be set up
-again afterwards.
-
-## Web GUI
-
-The web server runs on port 80 in both modes and always exposes the same pages.
-
-### First start / no Wi-Fi connection
-
-1. The device starts the `ESP-ThreadBR-XXXX` access point (open network).
-2. Connect to it; the captive portal opens http://192.168.4.1/wifi_configuration.html.
-3. Optionally configure the Thread network first via *Management → Network* (dataset and TLVs work
-   while the access point is up).
-4. Enter the Wi-Fi credentials and save. They are stored in NVS and the device connects as a
-   station; on failure it reboots and brings the setup access point back up.
-
-### Firmware updates
-
-*System → Firmware* shows the running version and the target OTA partition and offers:
-
-- **Upload an image**: send `build/esp_ot_br.bin` straight from the browser.
-- **Update from a URL**: the device downloads the image itself (HTTPS is verified against the
-  certificate bundle). Tick *Combined host + RCP image* for a `build/ota_with_rcp_image` bundle
-  created with `CREATE_OTA_IMAGE_WITH_RCP_FW`; the RCP is then updated on the next boot.
-
-The device restarts automatically after a successful update. Only one update can run at a time and
-images larger than the OTA partition are rejected before anything is written.
-
-## How to use example
+## Reference: upstream example documentation
 
 ### Hardware Required
 
