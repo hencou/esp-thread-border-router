@@ -1,20 +1,30 @@
-# ESP32 Thread Border Router
+# ESP32 Thread Border Router (OTBR) with web GUI, Wi-Fi setup and OTA
 
-An [OpenThread border router](https://openthread.io/guides/border-router) for the ESP Thread Border
-Router Board (ESP32-S3 host + ESP32-H2 RCP), managed entirely from a web GUI: Thread network and
-dataset/TLVs, commissioning, topology, addresses, Wi-Fi, firmware updates and a remote console.
+A ready-to-flash [OpenThread Border Router](https://openthread.io/guides/border-router) (OTBR)
+firmware for the ESP Thread Border Router Board (ESP32-S3 host + ESP32-H2 RCP), for connecting
+Thread and Matter devices — for example a Home Assistant Thread network — to your Wi-Fi network.
+Everything is managed from the browser: Thread network and Active Operational Dataset (TLV),
+commissioning, topology, IPv6 addresses, Wi-Fi provisioning, OTA firmware updates and a remote
+OpenThread CLI console. No serial cable or Docker OTBR host is needed.
 
 This repository is standalone: the `esp_ot_br_server`, `esp_br_http_ota` and `thread_border_router`
 components of [esp-thread-br](https://github.com/espressif/esp-thread-br) are vendored under
 `components/`, so only ESP-IDF is required if you want to build it yourself.
 
-On top of the upstream example it provides:
+## Features
 
-- A **Firmware** page to update the border router from a browser upload or from a URL.
-- A **Wi-Fi** page to scan for and switch to another network.
-- A **Console** page with the OpenThread CLI and the device log, so no serial cable is needed.
-- A setup access point (`ESP-ThreadBR-XXXX`, http://192.168.4.1) that serves the *complete* web GUI,
-  so the Thread dataset/TLVs can already be configured before the device is on your Wi-Fi network.
+- **No-cable installation**: flash one merged factory image with
+  [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) from the browser.
+- **Wi-Fi provisioning over SoftAP**: a setup access point (`ESP-ThreadBR-XXXX`,
+  http://192.168.4.1) that serves the *complete* web GUI, so the Thread dataset/TLVs can already be
+  configured before the device is on your Wi-Fi network, and a **Wi-Fi** page to switch networks
+  later.
+- **OTA firmware updates from the browser**: one update bundle updates the application, the web GUI
+  and the RCP (ESP32-H2) firmware at once, from an upload or a URL.
+- **Remote console**: the OpenThread CLI (`state`, `netdata show`, `br omrprefix`, …) and the device
+  log in the web GUI.
+- **Home Assistant / Matter friendly**: the OTBR REST API is served on port 80, so the Home
+  Assistant OpenThread Border Router integration can push its dataset to this device.
 
 ## Installation
 
